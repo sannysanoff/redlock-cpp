@@ -33,8 +33,8 @@
 
 #include <iostream>
 #include <vector>
-#include "hiredis/hiredis.h"
 extern "C" {
+#include "hiredis/hiredis.h"
 #include "sds.h"
 }
 
@@ -56,7 +56,7 @@ public:
     virtual                 ~CRedLock();
 public:
     bool                    Initialize();
-    bool                    AddServerUrl(const char *ip, const int port);
+    bool                    AddServerUrl(const char *ip, const int port, const char *auth = nullptr);
     void                    SetRetry(const int count, const int delay);
     bool                    Lock(const char *resource, const int ttl, CLock &lock);
     bool                    ContinueLock(const char *resource, const int ttl,

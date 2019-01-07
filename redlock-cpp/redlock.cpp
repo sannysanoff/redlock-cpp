@@ -102,15 +102,30 @@ bool CRedLock::Initialize() {
 // ----------------
 // add redis server
 // ----------------
-bool CRedLock::AddServerUrl(const char *ip, const int port) {
-    redisContext *c = NULL;
+bool CRedLock::AddServerUrl(const char *ip, const int port, const char *auth) {
+    bool retval = false;
+    redisContext *c = nullptr;
     struct timeval timeout = { 1, 500000 }; // 1.5 seconds
     c = redisConnectWithTimeout(ip, port, timeout);	
     if (c) {
-        m_redisServer.push_back(c);
+        if (auth) {
+            redisReply *reply;
+            reply = (redisReply *) redisCommand(c, "auth %s", auth);
+            if (reply && reply->str && strcmp(reply->str, "OK") == 0) {
+                m_redisServer.push_back(c);
+                retval = true;
+            }
+            if (reply) freeReplyObject(reply);
+            if (!retval)
+                redisFree(c);
+        } else {
+            retval = true;
+        }
+    } else {
+        retval = false;
     }
     m_quoRum = (int)m_redisServer.size() / 2 + 1;
-    return true;
+    return retval;
 }
 
 // ----------------
@@ -131,7 +146,7 @@ bool CRedLock::Lock(const char *resource, const int ttl, CLock &lock) {
     }
     lock.m_resource = sdsnew(resource);
     lock.m_val = val;
-    printf("Get the unique id is %s\n", val);
+    //printf("Get the unique id is %s\n", val);
     int retryCount = m_retryCount;
     do {
         int n = 0;
@@ -147,8 +162,10 @@ bool CRedLock::Lock(const char *resource, const int ttl, CLock &lock) {
         //for small TTLs.
         int drift = (ttl * m_clockDriftFactor) + 2;
         int validityTime = ttl - ((int)time(NULL) * 1000 - startTime) - drift;
+/*
         printf("The resource validty time is %d, n is %d, quo is %d\n",
                validityTime, n, m_quoRum);
+*/
         if (n >= m_quoRum && validityTime > 0) {
             lock.m_validityTime = validityTime;
             return true;
@@ -167,37 +184,42 @@ bool CRedLock::Lock(const char *resource, const int ttl, CLock &lock) {
 // release resource
 // ----------------
 bool CRedLock::ContinueLock(const char *resource, const int ttl, CLock &lock) {
-    sds val = GetUniqueLockId();
-    if (!val) {
+//    sds val = GetUniqueLockId();
+    if (!lock.m_val) {
         return false;
     }
-    lock.m_resource = sdsnew(resource);
-    lock.m_val = val;
+    //lock.m_resource = sdsnew(resource);
+    //lock.m_val = val;
     if (m_continueLock.m_resource == NULL) {
         m_continueLock.m_resource = sdsnew(resource);
-        m_continueLock.m_val = sdsnew(val);
+        m_continueLock.m_val = sdsnew(lock.m_val);
+    } else {
+        m_continueLock.m_resource = sdscpy(m_continueLock.m_resource, resource);
+        m_continueLock.m_val = sdscpy(m_continueLock.m_val, lock.m_val);
     }
-    printf("Get the unique id is %s\n", val);
+    //printf("Get the unique id is %s\n", val);
     int retryCount = m_retryCount;
     do {
         int n = 0;
         int startTime = (int)time(NULL) * 1000;
         int slen = (int)m_redisServer.size();
         for (int i = 0; i < slen; i++) {
-            if (ContinueLockInstance(m_redisServer[i], resource, val, ttl)) {
+            if (ContinueLockInstance(m_redisServer[i], resource, lock.m_val, ttl)) {
                 n++;
             }
         }
         // update old val
-        sdsfree(m_continueLock.m_val);
-        m_continueLock.m_val = sdsnew(val);
+        //sdsfree(m_continueLock.m_val);
+        //m_continueLock.m_val = sdsnew(val);
         //Add 2 milliseconds to the drift to account for Redis expires
         //precision, which is 1 millisecond, plus 1 millisecond min drift
         //for small TTLs.
         int drift = (ttl * m_clockDriftFactor) + 2;
         int validityTime = ttl - ((int)time(NULL) * 1000 - startTime) - drift;
+/*
         printf("The resource validty time is %d, n is %d, quo is %d\n",
                validityTime, n, m_quoRum);
+*/
         if (n >= m_quoRum && validityTime > 0) {
             lock.m_validityTime = validityTime;
             return true;
@@ -232,7 +254,7 @@ bool CRedLock::LockInstance(redisContext *c, const char *resource,
     reply = (redisReply *)redisCommand(c, "set %s %s px %d nx",
                                        resource, val, ttl);
     if (reply) {
-        printf("Set return: %s [null == fail, OK == success]\n", reply->str);
+        //printf("Set return: %s [null == fail, OK == success]\n", reply->str);
     }
     if (reply && reply->str && strcmp(reply->str, "OK") == 0) {
         freeReplyObject(reply);
@@ -262,7 +284,7 @@ bool CRedLock::ContinueLockInstance(redisContext *c, const char *resource,
     redisReply *reply = RedisCommandArgv(c, argc, continueLockScriptArgv);
     sdsfree(sdsTTL);
     if (reply) {
-        printf("Set return: %s [null == fail, OK == success]\n", reply->str);
+        //printf("Set return: %s [null == fail, OK == success]\n", reply->str);
     }
     if (reply && reply->str && strcmp(reply->str, "OK") == 0) {
         freeReplyObject(reply);
@@ -305,7 +327,7 @@ redisReply * CRedLock::RedisCommandArgv(redisContext *c, int argc, char **inargv
     redisReply *reply = NULL;
     reply = (redisReply *)redisCommandArgv(c, argc, (const char **)argv, argvlen);
     if (reply) {
-        printf("RedisCommandArgv return: %lld\n", reply->integer);
+        //printf("RedisCommandArgv return: %lld\n", reply->integer);
     }
     free(argvlen);
     sdsfreesplitres(argv, argc);
