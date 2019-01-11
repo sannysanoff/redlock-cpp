@@ -33,6 +33,8 @@
 
 #include <iostream>
 #include <vector>
+#include <functional>
+
 extern "C" {
 #include "hiredis/hiredis.h"
 #include "sds.h"
@@ -54,11 +56,16 @@ class CRedLock {
 public:
                             CRedLock();
     virtual                 ~CRedLock();
+    enum class LockResult {
+        SpinStopped,
+        Obtained,
+        DidNotObtain
+    };
 public:
     bool                    Initialize();
     bool                    AddServerUrl(const char *ip, const int port, const char *auth = nullptr);
     void                    SetRetry(const int count, const int delay);
-    bool                    Lock(const char *resource, const int ttl, CLock &lock);
+    LockResult              Lock(const char *resource, const int ttl, CLock &lock, std::function<bool()> shouldKeepTrying);
     bool                    ContinueLock(const char *resource, const int ttl,
                                          CLock &lock);
     bool                    Unlock(const CLock &lock);

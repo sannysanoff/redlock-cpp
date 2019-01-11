@@ -139,10 +139,10 @@ void CRedLock::SetRetry(const int count, const int delay) {
 // ----------------
 // lock the resource
 // ----------------
-bool CRedLock::Lock(const char *resource, const int ttl, CLock &lock) {
+CRedLock::LockResult CRedLock::Lock(const char *resource, const int ttl, CLock &lock, std::function<bool()> shouldKeepTrying) {
     sds val = GetUniqueLockId();
     if (!val) {
-        return false;
+        return CRedLock::LockResult::DidNotObtain;
     }
     lock.m_resource = sdsnew(resource);
     lock.m_val = val;
@@ -168,16 +168,19 @@ bool CRedLock::Lock(const char *resource, const int ttl, CLock &lock) {
 */
         if (n >= m_quoRum && validityTime > 0) {
             lock.m_validityTime = validityTime;
-            return true;
+            return CRedLock::LockResult::Obtained;
         } else {
             Unlock(lock);
         }
         // Wait a random delay before to retry
-        int delay = rand() % m_retryDelay + floor(m_retryDelay / 2);
-        usleep(delay * 1000);
+        if (!shouldKeepTrying()) {
+            return CRedLock::LockResult::SpinStopped;
+        }
+        int delay = static_cast<int>(rand() % m_retryDelay + floor(m_retryDelay / 2));
+        usleep(static_cast<__useconds_t>(delay * 1000));
         retryCount--;
     } while (retryCount > 0);
-    return false;
+    return CRedLock::LockResult::DidNotObtain;
 }
 
 // ----------------
